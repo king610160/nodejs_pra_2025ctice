@@ -25,42 +25,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Step 3: 執行部署指令
-      # 🌟 修正點 3: 確保縮排正確
+      # Step 3: 執行部署指令 (修正 AWS CLI 參數傳遞錯誤)
       - name: Execute Deployment Commands on EC2
         run: |
-          # 準備要執行的部署腳本 (單行字串或用 Bash 語法包裝)
+          # 1. 將多行 Bash 腳本包裝成單行字串，使用雙引號
           DEPLOY_SCRIPT="
-            PROJECT_DIR='/home/ec2-user/simple_router'
-            SERVICE_NAME='simple-router'
-            REPO_URL='https://github.com/${{ github.repository }}.git'
+            PROJECT_DIR='/home/ec2-user/simple_router';
+            SERVICE_NAME='simple-router';
+            REPO_URL='https://github.com/${{ github.repository }}.git';
             
             # 確保 NVM 環境變數生效，以便找到 pnpm 和 pm2
-            # 這是必要的，因為 SSM 腳本沒有登入 shell 環境
-            source /home/ec2-user/.bashrc || true 
-
+            source /home/ec2-user/.bashrc || true;
+            
+            # 首次部署/更新邏輯
             if [ ! -d \"\$PROJECT_DIR\" ]; then
-              echo '--- 執行首次部署 (Initial Deployment) ---'
-              mkdir -p \"\$PROJECT_DIR\"
-              cd \"\$PROJECT_DIR\"
-              git clone \"\$REPO_URL\" .
-              pnpm install
-              pm2 start index.js --name \"\$SERVICE_NAME\"
-              pm2 save
+              echo '--- 執行首次部署 (Initial Deployment) ---';
+              mkdir -p \"\$PROJECT_DIR\";
+              cd \"\$PROJECT_DIR\";
+              git clone \"\$REPO_URL\" .;
+              pnpm install;
+              pm2 start index.js --name \"\$SERVICE_NAME\";
+              pm2 save;
             else
-              echo '--- 執行程式碼更新 (Update Deployment) ---'
-              cd \"\$PROJECT_DIR\"
-              git pull origin main
-              pnpm install
-              pm2 reload \"\$SERVICE_NAME\"
-            fi
+              echo '--- 執行程式碼更新 (Update Deployment) ---';
+              cd \"\$PROJECT_DIR\";
+              git pull origin main;
+              pnpm install;
+              pm2 reload \"\$SERVICE_NAME\";
+            fi;
             echo '--- 部署完成 ---'
           "
+          
+          # 2. 移除所有換行符號和多餘的空格，將其壓縮成適合 CLI 傳遞的單行字串
+          # 並使用 jq 建立 JSON 格式的參數 (這是最穩定的方式)
+          # 注意：將 Bash 腳本中的雙引號 (\" ) 轉義
+          CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
 
-          # 使用 AWS CLI 的 ssm send-command 服務發送腳本到 EC2
-          # 確保 AWS CLI 在上一個步驟被正確認證
+          # 3. 使用 AWS CLI 透過 JSON 格式傳遞參數
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="$DEPLOY_SCRIPT" \
+            --parameters '{"commands": ["'"$CLEAN_SCRIPT"'"]}' \
             --timeout-seconds 600
