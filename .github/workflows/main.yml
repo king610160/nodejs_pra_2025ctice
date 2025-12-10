@@ -1,3 +1,11 @@
+name: Node.js EC2 Deployment via SSM
+
+# 確保這部分在文件開頭，且縮排正確
+on:
+  push:
+    branches:
+      - main
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -39,7 +47,7 @@ jobs:
               git clone \"\$REPO_URL\" \"\$PROJECT_DIR\";
               cd \"\$PROJECT_DIR\";
               
-              npm install;
+              pnpm install;
               pm2 start index.js --name \"\$SERVICE_NAME\";
               pm2 save;
             else
@@ -51,7 +59,7 @@ jobs:
               git pull origin main;
               
               # 安裝依賴 (以防 package.json 有變動)
-              npm install;
+              pnpm install;
               
               # 重載 PM2 服務
               pm2 reload \"\$SERVICE_NAME\";
