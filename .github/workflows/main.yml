@@ -1,4 +1,3 @@
-## success deploy
 name: Node.js EC2 Deployment via SSM
 
 # 確保這部分在文件開頭，且縮排正確
@@ -10,15 +9,12 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    # 🌟 修正點 1: 必須要有 steps: 關鍵字
     steps:
-      # Step 1: 檢查程式碼
+      # Step 1: 檢查程式碼 (保持不變)
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # Step 2: 認證 (使用 aws-actions/configure-aws-credentials)
-      # 🌟 修正點 2: 確保縮排正確
+      # Step 2: 認證 (保持不變)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,49 +22,59 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Step 3: 執行部署指令 (分步執行，專為首次部署設計)          
-      # A. 執行環境和首次部署：
-      - name: Create Directory and Git Clone
+      # 🌟 Step 3: 執行智慧化部署腳本 (一個步驟處理所有邏輯)
+      - name: Execute Smart Deployment Script on EC2
         run: |
-          # 設定變數，讓 GitHub Runner 解析
+          # 1. 定義變數和遠端腳本內容
           PROJECT_DIR=/home/ec2-user/simple_router
           SERVICE_NAME=simple-router
           REPO_URL=https://github.com/${{ github.repository }}.git
           
-          # 將要執行的遠端腳本定義為一個單行字串
-          # 內部指令使用單引號
-          REMOTE_SCRIPT="git clone $REPO_URL $PROJECT_DIR"
-          
-          echo "Sending command: Create Directory and Git Clone"
-          
-          # 🚨 修正點：使用單引號 '...' 包裹整個 parameters 參數
-          # 內部使用雙引號 "..." 包裹 su -c 的指令
-          aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["su - ec2-user -c \"'"$REMOTE_SCRIPT"'\""]' \
-            --timeout-seconds 600
+          # 這是將在 EC2 上以 ec2-user 身份執行的完整腳本
+          DEPLOY_SCRIPT="
+            PROJECT_DIR=$PROJECT_DIR;
+            SERVICE_NAME=$SERVICE_NAME;
+            REPO_URL=$REPO_URL;
             
-      # ----------------------------------------------
-      # B. 安裝依賴並啟動 PM2
-      # ----------------------------------------------
-      - name: Install Dependencies and Start PM2
-        run: |
-          PROJECT_DIR=/home/ec2-user/simple_router
-          SERVICE_NAME=simple-router
+            # 🌟 修正點：使用 NVM 環境初始化
+            export NVM_DIR=\"/home/ec2-user/.nvm\";
+            [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\"; # This loads nvm
+            [ -s \"\$NVM_DIR/bash_completion\" ] && \\. \"\$NVM_DIR/bash_completion\"; # This loads nvm bash_completion
+            
+            # 確保 npm/pm2 可用
+            nvm use node;
+            
+            # 判斷邏輯
+            if [ ! -d \"\$PROJECT_DIR\" ]; then
+              # ... (首次部署邏輯)
+              git clone \"\$REPO_URL\" \"\$PROJECT_DIR\";
+              cd \"\$PROJECT_DIR\";
+              
+              # 🌟 修正點：使用 npm install (假設 pnpm 帶來額外複雜性)
+              npm install; 
+              
+              pm2 start index.js --name \"\$SERVICE_NAME\";
+              pm2 save;
+            else
+              # ... (更新部署邏輯)
+              cd \"\$PROJECT_DIR\";
+              git pull origin main;
+              
+              npm install;
+              pm2 reload \"\$SERVICE_NAME\";
+            fi;
+          "
           
-          INSTALL_START_COMMAND="source /home/ec2-user/.bashrc && cd $PROJECT_DIR && npm install && pm2 start index.js --name $SERVICE_NAME && pm2 save"
+          # 2. 格式化腳本以通過 AWS CLI
+          # 逃脫內部雙引號，並壓縮成單行
+          CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
           
-          echo "Sending command: Install and Start Service"
+          echo "Sending full command to SSM."
+          
+          # 3. 使用成功的引號結構發送 SSM Command
+          # su - ec2-user -c "..." 確保以 ec2-user 環境執行
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["su - ec2-user -c \"'"$INSTALL_START_COMMAND"'\""]' \
+            --parameters 'commands=["su - ec2-user -c \"'"$CLEAN_SCRIPT"'\""]' \
             --timeout-seconds 600
-          
-      # ----------------------------------------------
-      # C. 更新程式碼 (如果您之後要更新，這個步驟才會有用)
-      # ----------------------------------------------
-      - name: Update Code and Reload PM2
-        # 這個步驟暫時先不用管，我們專注於首次部署
-        run: echo "Skipping update for first deployment."
