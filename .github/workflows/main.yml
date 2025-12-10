@@ -47,6 +47,7 @@ jobs:
               npm install;
               pm2 start index.js --name \"\$SERVICE_NAME\";
               pm2 save;
+          "
 
           # 🚨 修正點：使用單引號 '...' 包裹整個 parameters 參數
           # 內部使用雙引號 "..." 包裹 su -c 的指令
