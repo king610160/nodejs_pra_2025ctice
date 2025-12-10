@@ -62,6 +62,9 @@ jobs:
           CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
 
           # 3. 使用 AWS CLI 透過 JSON 格式傳遞參數
+          # 🚨 修正點：使用 su - ec2-user -c "..." 包裝整個 SSM 腳本
+          SCRIPT_TO_RUN="su - ec2-user -c \"$CLEAN_SCRIPT\""
+          
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
