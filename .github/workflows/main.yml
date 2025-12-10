@@ -36,7 +36,7 @@ jobs:
           
           # 將要執行的遠端腳本定義為一個單行字串
           # 內部指令使用單引號
-          REMOTE_SCRIPT="mkdir -p $PROJECT_DIR && cd $PROJECT_DIR && git clone $REPO_URL ."
+          REMOTE_SCRIPT="git clone $REPO_URL $PROJECT_DIR"
           
           echo "Sending command: Create Directory and Git Clone"
           
