@@ -1,24 +1,11 @@
-## success deploy
-name: Node.js EC2 Deployment via SSM
-
-# 確保這部分在文件開頭，且縮排正確
-on:
-  push:
-    branches:
-      - main
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    # 🌟 修正點 1: 必須要有 steps: 關鍵字
     steps:
-      # Step 1: 檢查程式碼
+      # Step 1 & 2 保持不變 (認證和 Checkout)
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # Step 2: 認證 (使用 aws-actions/configure-aws-credentials)
-      # 🌟 修正點 2: 確保縮排正確
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -26,67 +13,43 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🌟 Step 3: 執行智慧化部署腳本 (單一步驟，使用 SUDO 解決權限問題)
-      - name: Execute Smart Deployment Script on EC2
-        run: |
-          # 1. 定義變數和遠端腳本內容
-          PROJECT_DIR=/home/ec2-user/simple_router
-          SERVICE_NAME=simple-router
-          REPO_URL=https://github.com/${{ github.repository }}.git
-          LOG_FILE=/tmp/ssm_deploy_$(date +%Y%m%d%H%M%S).log
-
-          # 這是將在 EC2 上以 **root** 身份啟動的腳本
-          DEPLOY_SCRIPT="
-            # 必須使用絕對路徑來確保環境載入
-            LOG_FILE=$LOG_FILE;
-            PROJECT_DIR=$PROJECT_DIR;
-            SERVICE_NAME=$SERVICE_NAME;
-            REPO_URL=$REPO_URL;
+      # 🌟 Step 3: 使用 AWS SSM Action 執行遠端腳本 (最穩定的方式)
+      - name: Execute Smart Deployment Script on EC2 via Action
+        uses: peterjgrainger/aws-ssm-send-command@v2
+        id: ssm_deploy
+        with:
+          instance_ids: '${{ secrets.EC2_INSTANCE_ID }}'
+          aws_region: '${{ secrets.AWS_REGION }}'
+          # 🚨 關鍵：將整個多行腳本直接傳給 commands 參數
+          commands: |
+            PROJECT_DIR=/home/ec2-user/simple_router
+            SERVICE_NAME=simple-router
+            REPO_URL=https://github.com/${{ github.repository }}.git
             
-            echo '--- Deployment Script Started (as root) ---' > \$LOG_FILE 2>&1;
+            # --- 完整的、乾淨的 Bash 腳本 ---
+            # 必須使用 sudo -u ec2-user 執行，以確保檔案權限正確
+            sudo -u ec2-user bash << EOF
             
-            # --- 核心邏輯：使用 sudo -u ec2-user 執行所有操作 ---
+            # 1. NVM/Node 環境設置
+            export NVM_DIR="/home/ec2-user/.nvm"
+            [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
+            nvm use node
             
-            DEPLOY_COMMAND='
-                # NVM Environment Setup for ec2-user
-                export NVM_DIR=\"/home/ec2-user/.nvm\";
-                [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\";
-                nvm use node;
-                
-                # Check for existence and execute appropriate action
-                if [ ! -d \"\$PROJECT_DIR\" ]; then
-                  # 首次部署
-                  echo \"Initial Deployment...\";
-                  git clone \"\$REPO_URL\" \"\$PROJECT_DIR\";
-                  cd \"\$PROJECT_DIR\";
-                  npm install; 
-                  pm2 start index.js --name \"\$SERVICE_NAME\";
-                  pm2 save;
-                else
-                  # 更新部署
-                  echo \"Update Deployment...\";
-                  cd \"\$PROJECT_DIR\";
-                  git pull origin main;
-                  npm install;
-                  pm2 reload \"\$SERVICE_NAME\";
-                fi;
-            '
+            # 2. 判斷邏輯
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "--- 執行首次部署 (Initial Deployment) ---"
+              git clone "$REPO_URL" "$PROJECT_DIR"
+              cd "$PROJECT_DIR"
+              npm install
+              pm2 start index.js --name "$SERVICE_NAME"
+              pm2 save
+            else
+              echo "--- 執行程式碼更新 (Update Deployment) ---"
+              cd "$PROJECT_DIR"
+              git pull origin main
+              npm install
+              pm2 reload "$SERVICE_NAME"
+            fi
+            echo "--- 部署完成 ---"
             
-            # 🌟 修正點：使用 sudo -u ec2-user 執行整個部署塊
-            sudo -u ec2-user bash -c \"\$DEPLOY_COMMAND\" >> \$LOG_FILE 2>&1;
-            
-            echo '--- Deployment Script Finished ---' >> \$LOG_FILE 2>&1;
-          "
-          
-          # 2. 格式化腳本 (保持不變)
-          CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
-          
-          echo "Sending full command to SSM using SUDO technique."
-          
-          # 3. 使用成功的引號結構發送 SSM Command (不再需要 su -c)
-          # 腳本現在由 root 執行， root 會呼叫 sudo -u ec2-user
-          aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["'"$CLEAN_SCRIPT"'"]' \
-            --timeout-seconds 600
+            EOF
