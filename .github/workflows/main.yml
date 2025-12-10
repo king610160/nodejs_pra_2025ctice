@@ -22,34 +22,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🌟 Step 3: 使用 AWS 官方 SSM Action 執行遠端腳本 (極簡更新版)
-      - name: Execute Update Deployment Script on EC2
-        uses: aws-actions/aws-ssm-send-command@v1
-        id: ssm_deploy_update
-        with:
-          instance-ids: '${{ secrets.EC2_INSTANCE_ID }}'
-          document-name: 'AWS-RunShellScript'
-          
-          parameters: |
-            commands: |
-              PROJECT_DIR=/home/ec2-user/simple_router
-              SERVICE_NAME=simple-router
-              
-              # --- 極簡更新腳本 (不再需要複雜的 if/else) ---
-              # 必須使用 sudo -u ec2-user 執行
-              sudo -u ec2-user bash << EOF
-              
-              # 1. NVM/Node 環境設置
-              export NVM_DIR="/home/ec2-user/.nvm"
-              [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
-              nvm use node
-              
-              # 2. 執行更新
-              echo "--- Executing Update Deployment ---"
-              cd "$PROJECT_DIR"
-              git pull origin main # 只執行 pull
-              npm install          # 重新安裝依賴
-              pm2 reload "$SERVICE_NAME" # 重載服務
-              echo "--- Deployment Finished ---"
-              
-              EOF
+      # 🌟 Step 3: 執行 EC2 上的本地部署腳本 (最簡潔的 CI/CD 寫法)
+      - name: Execute Local Deployment Script on EC2
+        run: |
+          REMOTE_COMMAND="sudo -u ec2-user /home/ec2-user/deploy.sh"
+
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["'"$REMOTE_COMMAND"'"]' \
+            --timeout-seconds 600
