@@ -26,24 +26,34 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       # Step 3: 執行部署指令 (修正 AWS CLI 參數傳遞錯誤)
-      - name: Execute Deployment Commands on EC2
+      - name: Execute Deployment Commands on EC2 (Final Root Execution)
         run: |
-          # 1. 將多行 Bash 腳本包裝成單行字串，使用雙引號
+          # 1. 修正 REPO_URL 變數賦值
           DEPLOY_SCRIPT="
             PROJECT_DIR='/home/ec2-user/simple_router';
             SERVICE_NAME='simple-router';
-            REPO_URL='https://github.com/${{ github.repository }}.git';
+            REPO_URL=https://github.com/${{ github.repository }}.git; 
             
-            # 確保 NVM 環境變數生效，以便找到 npm 和 pm2
-            source /home/ec2-user/.bashrc || true;
+            # 🌟 修正點：定義 NVM PATH，確保 root 也能找到 pm2 和 pnpm
+            # 假設 Node.js 安裝在 NVM v18.16.0，請檢查您的 NVM 路徑是否正確
+            # 注意：這裡使用 /home/ec2-user/.nvm/versions/node/v18.16.0/bin/
+            # 如果您的版本是 20，請將 v18.16.0 替換為 v20.x.x
+            NVM_PATH=/home/ec2-user/.nvm/versions/node/v18.16.0/bin;
+            
+            # 確保 NVM 環境變數生效
+            PATH=\$PATH:\$NVM_PATH;
             
             # 首次部署/更新邏輯
             if [ ! -d \"\$PROJECT_DIR\" ]; then
               echo '--- 執行首次部署 (Initial Deployment) ---';
               mkdir -p \"\$PROJECT_DIR\";
               cd \"\$PROJECT_DIR\";
-              git clone \"\$REPO_URL\" .;
+              git clone \"\$REPO_URL\" .; 
+              
+              # 使用絕對路徑下的 npm
               npm install;
+              
+              # 使用絕對路徑下的 pm2
               pm2 start index.js --name \"\$SERVICE_NAME\";
               pm2 save;
             else
@@ -56,15 +66,11 @@ jobs:
             echo '--- 部署完成 ---'
           "
           
-          # 2. 移除所有換行符號和多餘的空格，將其壓縮成適合 CLI 傳遞的單行字串
-          # 並使用 jq 建立 JSON 格式的參數 (這是最穩定的方式)
-          # 注意：將 Bash 腳本中的雙引號 (\" ) 轉義
+          # 2. 壓縮腳本 (保持不變)
           CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
 
-          # 3. 使用 AWS CLI 透過 JSON 格式傳遞參數
-          # 🚨 修正點：使用 su - ec2-user -c "..." 包裝整個 SSM 腳本
-          SCRIPT_TO_RUN="su - ec2-user -c \"$CLEAN_SCRIPT\""
-          
+          # 3. 使用 AWS CLI 傳遞腳本 (移除 su - ec2-user)
+          # 🌟 修正點：直接傳遞 CLEAN_SCRIPT，讓 SSM Agent (root) 執行
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
