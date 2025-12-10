@@ -5,15 +5,16 @@ on:
   push:
     branches:
       - main
-
+      
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # Step 1 & 2 保持不變 (認證和 Checkout)
+      # Step 1: 檢查程式碼 (保持不變)
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      # Step 2: 認證 (保持不變)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -21,43 +22,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🌟 Step 3: 使用 AWS SSM Action 執行遠端腳本 (最穩定的方式)
-      - name: Execute Smart Deployment Script on EC2 via Action
-        uses: peterjgrainger/aws-ssm-send-command@v2
+      # 🌟 Step 3: 使用 AWS 官方 SSM Action 執行遠端腳本
+      - name: Execute Smart Deployment Script on EC2 via Official AWS Action
+        uses: aws-actions/aws-ssm-send-command@v1 # 官方 Action
         id: ssm_deploy
         with:
-          instance_ids: '${{ secrets.EC2_INSTANCE_ID }}'
-          aws_region: '${{ secrets.AWS_REGION }}'
-          # 🚨 關鍵：將整個多行腳本直接傳給 commands 參數
-          commands: |
-            PROJECT_DIR=/home/ec2-user/simple_router
-            SERVICE_NAME=simple-router
-            REPO_URL=https://github.com/${{ github.repository }}.git
-            
-            # --- 完整的、乾淨的 Bash 腳本 ---
-            # 必須使用 sudo -u ec2-user 執行，以確保檔案權限正確
-            sudo -u ec2-user bash << EOF
-            
-            # 1. NVM/Node 環境設置
-            export NVM_DIR="/home/ec2-user/.nvm"
-            [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
-            nvm use node
-            
-            # 2. 判斷邏輯
-            if [ ! -d "$PROJECT_DIR" ]; then
-              echo "--- 執行首次部署 (Initial Deployment) ---"
-              git clone "$REPO_URL" "$PROJECT_DIR"
-              cd "$PROJECT_DIR"
-              npm install
-              pm2 start index.js --name "$SERVICE_NAME"
-              pm2 save
-            else
-              echo "--- 執行程式碼更新 (Update Deployment) ---"
-              cd "$PROJECT_DIR"
-              git pull origin main
-              npm install
-              pm2 reload "$SERVICE_NAME"
-            fi
-            echo "--- 部署完成 ---"
-            
-            EOF
+          instance-ids: '${{ secrets.EC2_INSTANCE_ID }}'
+          document-name: 'AWS-RunShellScript'
+          
+          # 關鍵：將整個多行腳本直接傳給 parameters 參數 (Action 會負責打包)
+          parameters: |
+            commands: |
+              PROJECT_DIR=/home/ec2-user/simple_router
+              SERVICE_NAME=simple-router
+              REPO_URL=https://github.com/${{ github.repository }}.git
+              
+              # --- 完整的、乾淨的 Bash 腳本 ---
+              # 必須使用 sudo -u ec2-user 執行，以確保檔案權限正確
+              sudo -u ec2-user bash << EOF
+              
+              # 1. NVM/Node 環境設置
+              export NVM_DIR="/home/ec2-user/.nvm"
+              [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
+              nvm use node
+              
+              # 2. 判斷邏輯 (首次部署 vs. 更新部署)
+              if [ ! -d "$PROJECT_DIR" ]; then
+                echo "--- Initial Deployment ---"
+                git clone "$REPO_URL" "$PROJECT_DIR"
+                cd "$PROJECT_DIR"
+                npm install
+                pm2 start index.js --name "$SERVICE_NAME"
+                pm2 save
+              else
+                echo "--- Update Deployment ---"
+                cd "$PROJECT_DIR"
+                git pull origin main
+                npm install
+                pm2 reload "$SERVICE_NAME"
+              fi
+              echo "--- Deployment Finished ---"
+              
+              EOF
