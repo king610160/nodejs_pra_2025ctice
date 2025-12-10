@@ -1,79 +1,45 @@
-name: Node.js EC2 Deployment via SSM
-
-# 當推送到 main 分支時觸發 CI/CD
-on:
-  push:
-    branches:
-      - main
-
-# 環境變數定義
-env:
-  NODE_VERSION: '18.16.0'
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-    # Step 1: 檢查程式碼
-    - name: Checkout repository
-      uses: actions/checkout@v4
-        
-    # ----------------------------------------------------
-    # Step 2: 部署到 EC2 (使用 SSM Run Command)
-    # ----------------------------------------------------
-    - name: Deploy to EC2 via SSM
-      uses: aws-actions/aws-ssm-run-command@v1
+    - name: Deploy to EC2 via SSM (Using AWS CLI)
+      # ⚠️ 注意：使用 aws-actions/configure-aws-credentials 進行認證
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        # 傳入 GitHub Secrets 中的 AWS 憑證
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
-        
-        # 指定要執行指令的 EC2 實體
-        instance-id: ${{ secrets.EC2_INSTANCE_ID }}
-        
-        # 部署指令 (這是遠端 EC2 上要執行的 bash 腳本)
-        # 假設你的專案已經在 EC2 上，並且使用 PM2 管理
-        command: |
-          # 1. 設定變數 (AL2023 的家目錄)
-          PROJECT_DIR="/home/ec2-user/simple_router"
-          SERVICE_NAME="simple-router"
-          REPO_URL="https://github.com/${{ github.repository }}.git" # 動態獲取你的專案 URL
+
+    - name: Execute Deployment Commands on EC2
+      # 這裡我們直接使用 'run' 執行 Bash 命令，而不是依賴外部 Action
+      run: |
+        # 準備要執行的部署腳本 (必須是單行字串或用 Bash 語法包裝)
+        DEPLOY_SCRIPT="
+          PROJECT_DIR='/home/ec2-user/simple_router'
+          SERVICE_NAME='simple-router'
+          REPO_URL='https://github.com/${{ github.repository }}.git'
           
-          # 2. 確保 pnpm 和 pm2 存在於 PATH 中 (NVM 確保了這點)
-          # 注意：NVM 通常需要 source .bashrc 才能讓指令生效
-          source /home/ec2-user/.bashrc
-          
-          # 3. 判斷是首次啟動還是更新
-          if [ ! -d "$PROJECT_DIR" ]; then
-            echo "--- 執行首次部署 (Initial Deployment) ---"
-            
-            # 首次啟動：Clone 專案並啟動 PM2
-            mkdir -p "$PROJECT_DIR"
-            cd "$PROJECT_DIR"
-            git clone "$REPO_URL" .
-            
-            npm install
-            
-            # 首次啟動 PM2 服務
-            pm2 start index.js --name "$SERVICE_NAME"
+          # 確保 NVM 環境變數生效，以便找到 pnpm 和 pm2
+          source /home/ec2-user/.bashrc || true 
+
+          if [ ! -d \"\$PROJECT_DIR\" ]; then
+            echo '--- 執行首次部署 (Initial Deployment) ---'
+            mkdir -p \"\$PROJECT_DIR\"
+            cd \"\$PROJECT_DIR\"
+            git clone \"\$REPO_URL\" .
+            pnpm install
+            pm2 start index.js --name \"\$SERVICE_NAME\"
             pm2 save
-            
           else
-            echo "--- 執行程式碼更新 (Update Deployment) ---"
-            
-            # 更新：Git Pull 並 Reload PM2
-            cd "$PROJECT_DIR"
-            
+            echo '--- 執行程式碼更新 (Update Deployment) ---'
+            cd \"\$PROJECT_DIR\"
             git pull origin main
-            
-            # 安裝依賴 (如果 package.json 有變動)
-            npm install
-            
-            # 重新載入 PM2 服務
-            pm2 reload "$SERVICE_NAME"
-            
+            pnpm install
+            pm2 reload \"\$SERVICE_NAME\"
           fi
-          
-          echo "--- 部署完成 ---"
+          echo '--- 部署完成 ---'
+        "
+
+        # 使用 AWS CLI 的 ssm send-command 服務發送腳本到 EC2
+        # 'InstanceIds' 參數使用 EC2_INSTANCE_ID
+        aws ssm send-command \
+          --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+          --document-name "AWS-RunShellScript" \
+          --parameters commands="$DEPLOY_SCRIPT" \
+          --timeout-seconds 600
