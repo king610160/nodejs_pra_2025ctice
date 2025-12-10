@@ -18,15 +18,9 @@ jobs:
     # Step 1: 檢查程式碼
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    # Step 2: 設定 Node.js 環境 (CI 環境)
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
         
     # ----------------------------------------------------
-    # Step 3: 部署到 EC2 (使用 SSM Run Command)
+    # Step 2: 部署到 EC2 (使用 SSM Run Command)
     # ----------------------------------------------------
     - name: Deploy to EC2 via SSM
       uses: aws-actions/aws-ssm-run-command@v1
@@ -42,15 +36,44 @@ jobs:
         # 部署指令 (這是遠端 EC2 上要執行的 bash 腳本)
         # 假設你的專案已經在 EC2 上，並且使用 PM2 管理
         command: |
-          # 1. 切換到專案目錄 (請根據你的實際路徑調整)
-          cd /home/ec2-user/simple_router/
+          # 1. 設定變數 (AL2023 的家目錄)
+          PROJECT_DIR="/home/ec2-user/simple_router"
+          SERVICE_NAME="simple-router"
+          REPO_URL="https://github.com/${{ github.repository }}.git" # 動態獲取你的專案 URL
           
-          # 2. 拉取最新程式碼
-          git pull origin main
+          # 2. 確保 pnpm 和 pm2 存在於 PATH 中 (NVM 確保了這點)
+          # 注意：NVM 通常需要 source .bashrc 才能讓指令生效
+          source /home/ec2-user/.bashrc
           
-          # 3. 安裝依賴 (如果 package.json 有變動)
-          npm install
+          # 3. 判斷是首次啟動還是更新
+          if [ ! -d "$PROJECT_DIR" ]; then
+            echo "--- 執行首次部署 (Initial Deployment) ---"
+            
+            # 首次啟動：Clone 專案並啟動 PM2
+            mkdir -p "$PROJECT_DIR"
+            cd "$PROJECT_DIR"
+            git clone "$REPO_URL" .
+            
+            npm install
+            
+            # 首次啟動 PM2 服務
+            pm2 start index.js --name "$SERVICE_NAME"
+            pm2 save
+            
+          else
+            echo "--- 執行程式碼更新 (Update Deployment) ---"
+            
+            # 更新：Git Pull 並 Reload PM2
+            cd "$PROJECT_DIR"
+            
+            git pull origin main
+            
+            # 安裝依賴 (如果 package.json 有變動)
+            npm install
+            
+            # 重新載入 PM2 服務
+            pm2 reload "$SERVICE_NAME"
+            
+          fi
           
-          # 4. 重新啟動 PM2 服務 (假設服務名稱是 simple-router)
-          # PM2 會自動更新並重新載入服務
-          pm2 reload simple-router
+          echo "--- 部署完成 ---"
