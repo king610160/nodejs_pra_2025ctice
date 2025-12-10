@@ -37,17 +37,10 @@ jobs:
           
           # 將要執行的遠端腳本定義為一個單行字串
           # 內部指令使用單引號
-          if [ ! -d \"\$PROJECT_DIR\" ]; then
-              echo '--- 執行首次部署 (Initial Deployment) ---';
-              
-              # 由於我們不能先建資料夾，這裡直接 git clone 到目標路徑
-              git clone \"\$REPO_URL\" \"\$PROJECT_DIR\";
-              cd \"\$PROJECT_DIR\";
-              
-              npm install;
-              pm2 start index.js --name \"\$SERVICE_NAME\";
-              pm2 save;
-
+          REMOTE_SCRIPT="git clone $REPO_URL $PROJECT_DIR"
+          
+          echo "Sending command: Create Directory and Git Clone"
+          
           # 🚨 修正點：使用單引號 '...' 包裹整個 parameters 參數
           # 內部使用雙引號 "..." 包裹 su -c 的指令
           aws ssm send-command \
@@ -55,3 +48,27 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=["su - ec2-user -c \"'"$REMOTE_SCRIPT"'\""]' \
             --timeout-seconds 600
+            
+      # ----------------------------------------------
+      # B. 安裝依賴並啟動 PM2
+      # ----------------------------------------------
+      - name: Install Dependencies and Start PM2
+        run: |
+          PROJECT_DIR=/home/ec2-user/simple_router
+          SERVICE_NAME=simple-router
+          
+          INSTALL_START_COMMAND="source /home/ec2-user/.bashrc && cd $PROJECT_DIR && npm install && pm2 start index.js --name $SERVICE_NAME && pm2 save"
+          
+          echo "Sending command: Install and Start Service"
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["su - ec2-user -c \"'"$INSTALL_START_COMMAND"'\""]' \
+            --timeout-seconds 600
+          
+      # ----------------------------------------------
+      # C. 更新程式碼 (如果您之後要更新，這個步驟才會有用)
+      # ----------------------------------------------
+      - name: Update Code and Reload PM2
+        # 這個步驟暫時先不用管，我們專注於首次部署
+        run: echo "Skipping update for first deployment."
