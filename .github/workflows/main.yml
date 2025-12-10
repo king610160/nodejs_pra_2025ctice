@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -22,23 +22,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🌟 Step 3: 使用 AWS 官方 SSM Action 執行遠端腳本
-      - name: Execute Smart Deployment Script on EC2 via Official AWS Action
-        uses: aws-actions/aws-ssm-send-command@v1 # 官方 Action
-        id: ssm_deploy
+      # 🌟 Step 3: 使用 AWS 官方 SSM Action 執行遠端腳本 (極簡更新版)
+      - name: Execute Update Deployment Script on EC2
+        uses: aws-actions/aws-ssm-send-command@v1
+        id: ssm_deploy_update
         with:
           instance-ids: '${{ secrets.EC2_INSTANCE_ID }}'
           document-name: 'AWS-RunShellScript'
           
-          # 關鍵：將整個多行腳本直接傳給 parameters 參數 (Action 會負責打包)
           parameters: |
             commands: |
               PROJECT_DIR=/home/ec2-user/simple_router
               SERVICE_NAME=simple-router
-              REPO_URL=https://github.com/${{ github.repository }}.git
               
-              # --- 完整的、乾淨的 Bash 腳本 ---
-              # 必須使用 sudo -u ec2-user 執行，以確保檔案權限正確
+              # --- 極簡更新腳本 (不再需要複雜的 if/else) ---
+              # 必須使用 sudo -u ec2-user 執行
               sudo -u ec2-user bash << EOF
               
               # 1. NVM/Node 環境設置
@@ -46,21 +44,12 @@ jobs:
               [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"
               nvm use node
               
-              # 2. 判斷邏輯 (首次部署 vs. 更新部署)
-              if [ ! -d "$PROJECT_DIR" ]; then
-                echo "--- Initial Deployment ---"
-                git clone "$REPO_URL" "$PROJECT_DIR"
-                cd "$PROJECT_DIR"
-                npm install
-                pm2 start index.js --name "$SERVICE_NAME"
-                pm2 save
-              else
-                echo "--- Update Deployment ---"
-                cd "$PROJECT_DIR"
-                git pull origin main
-                npm install
-                pm2 reload "$SERVICE_NAME"
-              fi
+              # 2. 執行更新
+              echo "--- Executing Update Deployment ---"
+              cd "$PROJECT_DIR"
+              git pull origin main # 只執行 pull
+              npm install          # 重新安裝依賴
+              pm2 reload "$SERVICE_NAME" # 重載服務
               echo "--- Deployment Finished ---"
               
               EOF
