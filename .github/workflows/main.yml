@@ -22,57 +22,71 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 🌟 Step 3: 執行智慧化部署腳本 (一個步驟處理所有邏輯)
+      # 🌟 Step 3: 執行智慧化部署腳本 (單一步驟，含日誌)
       - name: Execute Smart Deployment Script on EC2
         run: |
           # 1. 定義變數和遠端腳本內容
           PROJECT_DIR=/home/ec2-user/simple_router
           SERVICE_NAME=simple-router
           REPO_URL=https://github.com/${{ github.repository }}.git
-          
+          LOG_FILE=/tmp/ssm_deploy_$(date +%Y%m%d%H%M%S).log
+
           # 這是將在 EC2 上以 ec2-user 身份執行的完整腳本
           DEPLOY_SCRIPT="
+            # 必須使用絕對路徑來確保環境載入
+            LOG_FILE=$LOG_FILE;
             PROJECT_DIR=$PROJECT_DIR;
             SERVICE_NAME=$SERVICE_NAME;
             REPO_URL=$REPO_URL;
             
-            # 🌟 修正點：使用 NVM 環境初始化
-            export NVM_DIR=\"/home/ec2-user/.nvm\";
-            [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\"; # This loads nvm
-            [ -s \"\$NVM_DIR/bash_completion\" ] && \\. \"\$NVM_DIR/bash_completion\"; # This loads nvm bash_completion
+            # --- START LOGGING ---
+            echo '--- Deployment Script Started ---' > \$LOG_FILE 2>&1;
+            echo 'Executing as user: \$(whoami)' >> \$LOG_FILE 2>&1;
+            
+            # 🌟 修正點：最穩定的 NVM/Node 環境載入
+            export NVM_DIR=\"/home/ec2-user/.nvm\" >> \$LOG_FILE 2>&1;
+            [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\" >> \$LOG_FILE 2>&1;
             
             # 確保 npm/pm2 可用
-            nvm use node;
-            
+            nvm use node >> \$LOG_FILE 2>&1;
+            if [ \$? -ne 0 ]; then
+                echo 'FATAL: NVM/Node environment failed to load!' >> \$LOG_FILE 2>&1;
+                exit 1;
+            fi
+
             # 判斷邏輯
             if [ ! -d \"\$PROJECT_DIR\" ]; then
-              # ... (首次部署邏輯)
-              git clone \"\$REPO_URL\" \"\$PROJECT_DIR\";
-              cd \"\$PROJECT_DIR\";
+              echo '--- 執行首次部署 (Initial Deployment) ---' >> \$LOG_FILE 2>&1;
               
-              # 🌟 修正點：使用 npm install (假設 pnpm 帶來額外複雜性)
-              npm install; 
+              git clone \"\$REPO_URL\" \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+              if [ \$? -ne 0 ]; then
+                  echo 'FATAL: git clone failed!' >> \$LOG_FILE 2>&1;
+                  exit 1;
+              fi
               
-              pm2 start index.js --name \"\$SERVICE_NAME\";
-              pm2 save;
+              cd \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+              npm install >> \$LOG_FILE 2>&1; 
+              pm2 start index.js --name \"\$SERVICE_NAME\" >> \$LOG_FILE 2>&1;
+              pm2 save >> \$LOG_FILE 2>&1;
             else
-              # ... (更新部署邏輯)
-              cd \"\$PROJECT_DIR\";
-              git pull origin main;
+              echo '--- 執行程式碼更新 (Update Deployment) ---' >> \$LOG_FILE 2>&1;
               
-              npm install;
-              pm2 reload \"\$SERVICE_NAME\";
+              cd \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+              git pull origin main >> \$LOG_FILE 2>&1;
+              
+              npm install >> \$LOG_FILE 2>&1;
+              pm2 reload \"\$SERVICE_NAME\" >> \$LOG_FILE 2>&1;
             fi;
+            
+            echo '--- 部署完成 ---' >> \$LOG_FILE 2>&1;
           "
           
-          # 2. 格式化腳本以通過 AWS CLI
-          # 逃脫內部雙引號，並壓縮成單行
+          # 2. 格式化腳本 (保持不變)
           CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
           
-          echo "Sending full command to SSM."
+          echo "Sending full command to SSM with log tracking."
           
-          # 3. 使用成功的引號結構發送 SSM Command
-          # su - ec2-user -c "..." 確保以 ec2-user 環境執行
+          # 3. 使用成功的引號結構發送 SSM Command (保持不變)
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
