@@ -25,63 +25,40 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Step 3: 執行部署指令 (分步執行，專為首次部署設計)
-      - name: Execute Deployment Commands on EC2 (Step-by-Step)
+      # Step 3: 執行部署指令 (分步執行，專為首次部署設計)          
+      # A. 執行環境和首次部署：
+      - name: Create Directory and Git Clone
         run: |
-          # 1. 設定變數
+          # 設定變數，讓 GitHub Runner 解析
           PROJECT_DIR=/home/ec2-user/simple_router
           SERVICE_NAME=simple-router
           REPO_URL=https://github.com/${{ github.repository }}.git
           
-          # 2. 判斷專案目錄是否存在，如果不存在，則執行首次部署指令
-          # 由於我們無法在 Runner 上直接判斷 EC2 上的文件系統，這裡先假設需要首次部署。
-          # 首次部署指令必須用 su - ec2-user 包裝，以確保 NVM 環境被載入
-          
-          # ----------------------------------------------
-          # A. 執行環境和首次部署：
-          # ----------------------------------------------
-          
-          # 檢查並建立目錄，然後 Git Clone
-          # 使用 echo 包裝，因為 SSM 命令執行環境可能沒有 Bash 的全部功能
-          CREATE_CLONE_COMMAND="
-            mkdir -p $PROJECT_DIR && 
-            cd $PROJECT_DIR && 
-            git clone $REPO_URL .
-          "
+          # 將要執行的遠端腳本定義為一個單行字串
+          # 內部指令使用單引號
+          REMOTE_SCRIPT="mkdir -p $PROJECT_DIR && cd $PROJECT_DIR && git clone $REPO_URL ."
           
           echo "Sending command: Create Directory and Git Clone"
+          
+          # 🚨 修正點：使用單引號 '...' 包裹整個 parameters 參數
+          # 內部使用雙引號 "..." 包裹 su -c 的指令
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="su - ec2-user -c \"$CREATE_CLONE_COMMAND\"" \
+            --parameters 'commands=["su - ec2-user -c \"'"$REMOTE_SCRIPT"'\""]' \
             --timeout-seconds 600
 
-      # ----------------------------------------------
       # B. 安裝依賴並啟動 PM2
-      # ----------------------------------------------
       - name: Install Dependencies and Start PM2
         run: |
           PROJECT_DIR=/home/ec2-user/simple_router
           SERVICE_NAME=simple-router
           
-          INSTALL_START_COMMAND="
-            source /home/ec2-user/.bashrc && 
-            cd $PROJECT_DIR && 
-            npm install && 
-            pm2 start index.js --name $SERVICE_NAME && 
-            pm2 save
-          "
+          INSTALL_START_COMMAND="source /home/ec2-user/.bashrc && cd $PROJECT_DIR && pnpm install && pm2 start index.js --name $SERVICE_NAME && pm2 save"
           
           echo "Sending command: Install and Start Service"
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="su - ec2-user -c \"$INSTALL_START_COMMAND\"" \
+            --parameters 'commands=["su - ec2-user -c \"'"$INSTALL_START_COMMAND"'\""]' \
             --timeout-seconds 600
-          
-      # ----------------------------------------------
-      # C. 更新程式碼 (如果您之後要更新，這個步驟才會有用)
-      # ----------------------------------------------
-      - name: Update Code and Reload PM2
-        # 這個步驟暫時先不用管，我們專注於首次部署
-        run: echo "Skipping update for first deployment."
