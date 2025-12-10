@@ -34,7 +34,7 @@ jobs:
             SERVICE_NAME='simple-router';
             REPO_URL='https://github.com/${{ github.repository }}.git';
             
-            # 確保 NVM 環境變數生效，以便找到 pnpm 和 pm2
+            # 確保 NVM 環境變數生效，以便找到 npm 和 pm2
             source /home/ec2-user/.bashrc || true;
             
             # 首次部署/更新邏輯
@@ -43,14 +43,14 @@ jobs:
               mkdir -p \"\$PROJECT_DIR\";
               cd \"\$PROJECT_DIR\";
               git clone \"\$REPO_URL\" .;
-              pnpm install;
+              npm install;
               pm2 start index.js --name \"\$SERVICE_NAME\";
               pm2 save;
             else
               echo '--- 執行程式碼更新 (Update Deployment) ---';
               cd \"\$PROJECT_DIR\";
               git pull origin main;
-              pnpm install;
+              npm install;
               pm2 reload \"\$SERVICE_NAME\";
             fi;
             echo '--- 部署完成 ---'
