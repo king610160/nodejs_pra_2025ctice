@@ -26,51 +26,74 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       # Step 3: 執行部署指令 (修正 AWS CLI 參數傳遞錯誤)
-      - name: Execute Deployment Commands on EC2 (Final Root Execution)
+      - name: Execute Deployment Commands on EC2 (Diagnostic Run)
         run: |
           # 1. 修正 REPO_URL 變數賦值
           DEPLOY_SCRIPT="
             PROJECT_DIR='/home/ec2-user/simple_router';
             SERVICE_NAME='simple-router';
             REPO_URL=https://github.com/${{ github.repository }}.git; 
-            
-            # 🌟 修正點：定義 NVM PATH，確保 root 也能找到 pm2 和 pnpm
-            # 假設 Node.js 安裝在 NVM v18.16.0，請檢查您的 NVM 路徑是否正確
-            # 注意：這裡使用 /home/ec2-user/.nvm/versions/node/v18.16.0/bin/
-            # 如果您的版本是 20，請將 v18.16.0 替換為 v20.x.x
+            LOG_FILE=/tmp/deployment_$(date +%Y%m%d%H%M%S).log;
             NVM_PATH=/home/ec2-user/.nvm/versions/node/v18.16.0/bin;
             
-            # 確保 NVM 環境變數生效
-            PATH=\$PATH:\$NVM_PATH;
+            # --- START LOGGING AND ENVIRONMENT SETUP ---
+            # 確保 root 可以找到 pnpm 和 pm2
+            export PATH=\$PATH:\$NVM_PATH;
             
-            # 首次部署/更新邏輯
+            echo '--- Deployment Script Started ---' > \$LOG_FILE 2>&1;
+            echo 'Executing as user: \$(whoami)' >> \$LOG_FILE 2>&1;
+            echo 'PATH: \$PATH' >> \$LOG_FILE 2>&1;
+            
+            # TEST POINT 1: Check basic permissions
+            touch /tmp/test_point_1.txt 2>&1;
+            echo 'TEST POINT 1: /tmp/test_point_1.txt created.' >> \$LOG_FILE 2>&1;
+            
+            # --- MAIN LOGIC ---
             if [ ! -d \"\$PROJECT_DIR\" ]; then
-              echo '--- 執行首次部署 (Initial Deployment) ---';
-              mkdir -p \"\$PROJECT_DIR\";
-              cd \"\$PROJECT_DIR\";
-              git clone \"\$REPO_URL\" .; 
+              echo '--- 執行首次部署 (Initial Deployment) ---' >> \$LOG_FILE 2>&1;
+              mkdir -p \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+              cd \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+
+              # TEST POINT 2: Before git clone
+              touch /tmp/test_point_2_pre_git.txt 2>&1;
+              echo 'TEST POINT 2: Pre-git-clone touch successful.' >> \$LOG_FILE 2>&1;
               
-              # 使用絕對路徑下的 npm
-              npm install;
+              # Git Clone (需要 Git 已經安裝)
+              git clone \"\$REPO_URL\" . >> \$LOG_FILE 2>&1;
+              if [ \$? -ne 0 ]; then
+                echo 'FATAL: git clone failed!' >> \$LOG_FILE 2>&1;
+                exit 1;
+              fi
+              echo 'INFO: git clone successful.' >> \$LOG_FILE 2>&1;
               
-              # 使用絕對路徑下的 pm2
-              pm2 start index.js --name \"\$SERVICE_NAME\";
-              pm2 save;
+              # TEST POINT 3: Before pnpm install
+              touch /tmp/test_point_3_pre_pnpm.txt 2>&1;
+              
+              # pnpm install
+              pnpm install >> \$LOG_FILE 2>&1;
+              if [ \$? -ne 0 ]; then
+                echo 'FATAL: pnpm install failed!' >> \$LOG_FILE 2>&1;
+                exit 1;
+              fi
+              
+              # pm2 start
+              pm2 start index.js --name \"\$SERVICE_NAME\" >> \$LOG_FILE 2>&1;
+              pm2 save >> \$LOG_FILE 2>&1;
             else
-              echo '--- 執行程式碼更新 (Update Deployment) ---';
-              cd \"\$PROJECT_DIR\";
-              git pull origin main;
-              npm install;
-              pm2 reload \"\$SERVICE_NAME\";
+              echo '--- 執行程式碼更新 (Update Deployment) ---' >> \$LOG_FILE 2>&1;
+              cd \"\$PROJECT_DIR\" >> \$LOG_FILE 2>&1;
+              git pull origin main >> \$LOG_FILE 2>&1;
+              pnpm install >> \$LOG_FILE 2>&1;
+              pm2 reload \"\$SERVICE_NAME\" >> \$LOG_FILE 2>&1;
             fi;
-            echo '--- 部署完成 ---'
+            
+            echo '--- 部署完成 ---' >> \$LOG_FILE 2>&1;
           "
           
           # 2. 壓縮腳本 (保持不變)
           CLEAN_SCRIPT=$(echo "$DEPLOY_SCRIPT" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/\"/\\"/g')
 
-          # 3. 使用 AWS CLI 傳遞腳本 (移除 su - ec2-user)
-          # 🌟 修正點：直接傳遞 CLEAN_SCRIPT，讓 SSM Agent (root) 執行
+          # 3. 使用 AWS CLI 傳遞腳本
           aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
