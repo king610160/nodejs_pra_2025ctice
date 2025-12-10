@@ -1,6 +1,6 @@
 name: Node.js EC2 Deployment via SSM
 
-# 當推送到 main 分支時觸發 CI/CD
+# 確保這部分在文件開頭，且縮排正確
 on:
   push:
     branches:
@@ -9,67 +9,65 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
+    # 🌟 修正點 1: 必須要有 steps: 關鍵字
     steps:
-    # Step 1: 檢查程式碼
-    - name: Checkout repository
-      uses: actions/checkout@v4
-        
-    # ----------------------------------------------------
-    # Step 2: 部署到 EC2 (使用 SSM Run Command)
-    # ----------------------------------------------------
-    - name: Deploy to EC2 via SSM
-      uses: aws-actions/aws-ssm-run-command@v1
-      with:
-        # 傳入 GitHub Secrets 中的 AWS 憑證
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
-        
-        # 指定要執行指令的 EC2 實體
-        instance-id: ${{ secrets.EC2_INSTANCE_ID }}
-        
-        # 部署指令 (這是遠端 EC2 上要執行的 bash 腳本)
-        # 假設你的專案已經在 EC2 上，並且使用 PM2 管理
-        command: |
-          # 1. 設定變數 (AL2023 的家目錄)
-          PROJECT_DIR="/home/ec2-user/simple_router"
-          SERVICE_NAME="simple-router"
-          REPO_URL="https://github.com/${{ github.repository }}.git" # 動態獲取你的專案 URL
+      # Step 1: 檢查程式碼
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: 認證 (使用 aws-actions/configure-aws-credentials)
+      # 🌟 修正點 2: 確保縮排正確
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step 3: 執行部署指令 (分步執行，專為首次部署設計)          
+      # A. 執行環境和首次部署：
+      - name: Create Directory and Git Clone
+        run: |
+          # 設定變數，讓 GitHub Runner 解析
+          PROJECT_DIR=/home/ec2-user/simple_router
+          SERVICE_NAME=simple-router
+          REPO_URL=https://github.com/${{ github.repository }}.git
           
-          # 2. 確保 pnpm 和 pm2 存在於 PATH 中 (NVM 確保了這點)
-          # 注意：NVM 通常需要 source .bashrc 才能讓指令生效
-          source /home/ec2-user/.bashrc
+          # 將要執行的遠端腳本定義為一個單行字串
+          # 內部指令使用單引號
+          REMOTE_SCRIPT="git clone $REPO_URL $PROJECT_DIR"
           
-          # 3. 判斷是首次啟動還是更新
-          if [ ! -d "$PROJECT_DIR" ]; then
-            echo "--- 執行首次部署 (Initial Deployment) ---"
-            
-            # 首次啟動：Clone 專案並啟動 PM2
-            mkdir -p "$PROJECT_DIR"
-            cd "$PROJECT_DIR"
-            git clone "$REPO_URL" .
-            
-            npm install
-            
-            # 首次啟動 PM2 服務
-            pm2 start index.js --name "$SERVICE_NAME"
-            pm2 save
-            
-          else
-            echo "--- 執行程式碼更新 (Update Deployment) ---"
-            
-            # 更新：Git Pull 並 Reload PM2
-            cd "$PROJECT_DIR"
-            
-            git pull origin main
-            
-            # 安裝依賴 (如果 package.json 有變動)
-            npm install
-            
-            # 重新載入 PM2 服務
-            pm2 reload "$SERVICE_NAME"
-            
-          fi
+          echo "Sending command: Create Directory and Git Clone"
           
-          echo "--- 部署完成 ---"
+          # 🚨 修正點：使用單引號 '...' 包裹整個 parameters 參數
+          # 內部使用雙引號 "..." 包裹 su -c 的指令
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["su - ec2-user -c \"'"$REMOTE_SCRIPT"'\""]' \
+            --timeout-seconds 600
+            
+      # ----------------------------------------------
+      # B. 安裝依賴並啟動 PM2
+      # ----------------------------------------------
+      - name: Install Dependencies and Start PM2
+        run: |
+          PROJECT_DIR=/home/ec2-user/simple_router
+          SERVICE_NAME=simple-router
+          
+          INSTALL_START_COMMAND="source /home/ec2-user/.bashrc && cd $PROJECT_DIR && npm install && pm2 start index.js --name $SERVICE_NAME && pm2 save"
+          
+          echo "Sending command: Install and Start Service"
+          aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["su - ec2-user -c \"'"$INSTALL_START_COMMAND"'\""]' \
+            --timeout-seconds 600
+          
+      # ----------------------------------------------
+      # C. 更新程式碼 (如果您之後要更新，這個步驟才會有用)
+      # ----------------------------------------------
+      - name: Update Code and Reload PM2
+        # 這個步驟暫時先不用管，我們專注於首次部署
+        run: echo "Skipping update for first deployment."
