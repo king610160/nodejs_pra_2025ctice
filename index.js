@@ -16,7 +16,7 @@ app.use('/api/echo', echoRouter);
 
 // [選留] 基礎路由
 app.get('/', (req, res) => {
-    res.send('應用程式主頁面 (已拆分架構), v3.5');
+    res.send('應用程式主頁面 (已拆分架構), v4');
 });
 
 // 啟動伺服器

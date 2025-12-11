@@ -11,14 +11,12 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # 🌟 修正點 1: 必須要有 steps: 關鍵字
     steps:
       # Step 1: 檢查程式碼
       - name: Checkout repository
         uses: actions/checkout@v4
       
       # Step 2: 認證 (使用 aws-actions/configure-aws-credentials)
-      # 🌟 修正點 2: 確保縮排正確
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
